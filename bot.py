@@ -40,12 +40,8 @@ async def progress(current, total, message, start, text):
 async def start(_, message):
 
     await message.reply_text(
-        "🎬 **MKV → MP4 REMUX BOT**\n\n"
-        "Send any **MKV video** and I will convert it to **MP4 instantly**.\n\n"
-        "⚡ Max Size: 500MB\n"
-        "⚡ No Quality Loss\n"
-        "⚡ Fast Container Change\n"
-        "⚡ Real Time Progress"
+        "🎬 MKV → MP4 REMUX BOT\n\n"
+        "Send MKV video under 500MB"
     )
 
 
@@ -71,20 +67,21 @@ async def convert(client, message):
     output = file_path.rsplit(".", 1)[0] + ".mp4"
 
     cmd = [
-"ffmpeg",
-"-y",
-"-i", file_path,
-"-c:v", "copy",
-"-c:a", "copy",
-"-sn",
-output
+        "ffmpeg",
+        "-y",
+        "-i", file_path,
+        "-c:v", "copy",
+        "-c:a", "copy",
+        "-sn",
+        output
     ]
 
     process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-if process.returncode != 0:
-    await status.edit("❌ Remux failed")
-    return
+    # ✅ FIXED PART
+    if process.returncode != 0:
+        await status.edit("❌ Remux failed")
+        return
 
     start = time.time()
 
