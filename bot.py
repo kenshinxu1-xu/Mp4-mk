@@ -7,7 +7,6 @@ from pyrogram import Client, filters
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-
 CATBOX_HASH = os.environ.get("CATBOX_HASH")
 
 app = Client(
@@ -17,7 +16,7 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# progress bar
+
 async def progress(current, total, message, start, text):
 
     now = time.time()
@@ -43,13 +42,12 @@ async def progress(current, total, message, start, text):
 async def start(_, message):
 
     await message.reply_text(
-        "🎬 MKV → MP4 + CATBOX BOT\n\n"
+        "🎬 MKV → MP4 BOT\n\n"
         "Send MKV video under 500MB\n"
-        "I will convert and upload to Catbox."
+        "Converted file will be uploaded to Catbox."
     )
 
 
-# catbox uploader
 def upload_catbox(file):
 
     url = "https://catbox.moe/user/api.php"
@@ -76,7 +74,7 @@ async def convert(client, message):
     if size > 500 * 1024 * 1024:
         return await message.reply("❌ File must be under 500MB")
 
-    status = await message.reply("📥 Starting Download...")
+    status = await message.reply("📥 Downloading...")
 
     start = time.time()
 
@@ -99,7 +97,7 @@ async def convert(client, message):
         output
     ]
 
-    process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.run(cmd)
 
     if process.returncode != 0:
         await status.edit("❌ Remux failed")
@@ -113,7 +111,6 @@ async def convert(client, message):
         f"✅ Upload Complete\n\n🔗 {link}"
     )
 
-    # auto delete files
     os.remove(file_path)
     os.remove(output)
 
