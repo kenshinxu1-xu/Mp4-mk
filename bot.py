@@ -88,3 +88,6 @@ async def convert(client, message):
 
         if output and os.path.exists(output):
             os.remove(output)
+if __name__ == "__main__":
+    print("Bot Starting...")
+    app.run()
