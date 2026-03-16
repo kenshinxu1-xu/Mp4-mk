@@ -71,12 +71,12 @@ async def convert(client, message):
     output = file_path.rsplit(".", 1)[0] + ".mp4"
 
     cmd = [
-        "ffmpeg",
-        "-i",
-        file_path,
-        "-c",
-        "copy",
-        output
+"ffmpeg",
+"-y",
+"-i", file_path,
+"-c", "copy",
+"-map", "0",
+output
     ]
 
     subprocess.run(cmd)
