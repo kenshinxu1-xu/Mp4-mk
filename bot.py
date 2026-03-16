@@ -7,7 +7,12 @@ API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-app = Client("remuxbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client(
+    "remuxbot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
+)
 
 
 async def progress(current, total, message, start, text):
@@ -19,75 +24,83 @@ async def progress(current, total, message, start, text):
         percent = current * 100 / total
         bar = "█" * int(percent / 5) + "░" * (20 - int(percent / 5))
 
+        speed = current / diff / 1024 / 1024
+        done = current / 1024 / 1024
+        total_mb = total / 1024 / 1024
+
         await message.edit(
             f"{text}\n\n"
-            f"[{bar}] {percent:.2f}%"
+            f"[{bar}] {percent:.2f}%\n\n"
+            f"⚡ Speed: {speed:.2f} MB/s\n"
+            f"📦 {done:.2f}/{total_mb:.2f} MB"
         )
 
 
 @app.on_message(filters.command("start"))
 async def start(_, message):
 
-    await message.reply(
-        "⚡ **MKV → MP4 REMUX BOT**\n\n"
-        "Send MKV video\n"
-        "Max size: 500MB\n"
-        "Files auto delete after upload"
+    await message.reply_text(
+        "🎬 **MKV → MP4 REMUX BOT**\n\n"
+        "Send any **MKV video** and I will convert it to **MP4 instantly**.\n\n"
+        "⚡ Max Size: 500MB\n"
+        "⚡ No Quality Loss\n"
+        "⚡ Fast Container Change\n"
+        "⚡ Real Time Progress"
     )
 
 
 @app.on_message(filters.video)
 async def convert(client, message):
 
-    status = await message.reply("📥 Downloading...")
+    size = message.video.file_size
 
-    file_path = None
-    output = None
+    if size > 500 * 1024 * 1024:
+        return await message.reply("❌ File must be under 500MB")
 
-    try:
+    status = await message.reply("📥 Starting Download...")
 
-        start = time.time()
+    start = time.time()
 
-        file_path = await message.download(
-            progress=progress,
-            progress_args=(status, start, "📥 Downloading")
-        )
+    file_path = await message.download(
+        progress=progress,
+        progress_args=(status, start, "📥 Downloading")
+    )
 
-        await status.edit("⚙️ Remuxing MKV → MP4...")
+    await status.edit("⚙️ Remuxing MKV → MP4...")
 
-        output = file_path.rsplit(".", 1)[0] + ".mp4"
+    output = file_path.rsplit(".", 1)[0] + ".mp4"
 
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i", file_path,
-            "-c:v", "copy",
-            "-c:a", "copy",
-            "-sn",
-            output
-        ]
+    cmd = [
+"ffmpeg",
+"-y",
+"-i", file_path,
+"-c:v", "copy",
+"-c:a", "copy",
+"-sn",
+output
+    ]
 
-        subprocess.run(cmd)
+    process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        start = time.time()
+if process.returncode != 0:
+    await status.edit("❌ Remux failed")
+    return
 
-        await message.reply_video(
-            output,
-            caption="✅ MKV → MP4 Done",
-            progress=progress,
-            progress_args=(status, start, "📤 Uploading")
-        )
+    start = time.time()
 
-        await status.delete()
+    await message.reply_video(
+        output,
+        caption="✅ MKV ➜ MP4 Completed",
+        progress=progress,
+        progress_args=(status, start, "📤 Uploading")
+    )
 
-    finally:
+    os.remove(file_path)
+    os.remove(output)
 
-        # AUTO CLEANUP
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
+    await status.delete()
 
-        if output and os.path.exists(output):
-            os.remove(output)
+
 if __name__ == "__main__":
     print("Bot Starting...")
     app.run()
