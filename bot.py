@@ -74,12 +74,17 @@ async def convert(client, message):
 "ffmpeg",
 "-y",
 "-i", file_path,
-"-c", "copy",
-"-map", "0",
+"-c:v", "copy",
+"-c:a", "copy",
+"-sn",
 output
-    ]
+        ]
 
-    subprocess.run(cmd)
+    process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+if process.returncode != 0:
+    await status.edit("❌ Remux failed")
+    return
 
     start = time.time()
 
