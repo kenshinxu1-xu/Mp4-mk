@@ -1,11 +1,14 @@
 import os
 import time
 import subprocess
+import requests
 from pyrogram import Client, filters
 
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+CATBOX_HASH = os.environ.get("CATBOX_HASH")
 
 app = Client(
     "remuxbot",
@@ -14,7 +17,7 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-
+# progress bar
 async def progress(current, total, message, start, text):
 
     now = time.time()
@@ -31,7 +34,7 @@ async def progress(current, total, message, start, text):
         await message.edit(
             f"{text}\n\n"
             f"[{bar}] {percent:.2f}%\n\n"
-            f"⚡ Speed: {speed:.2f} MB/s\n"
+            f"⚡ {speed:.2f} MB/s\n"
             f"📦 {done:.2f}/{total_mb:.2f} MB"
         )
 
@@ -40,9 +43,29 @@ async def progress(current, total, message, start, text):
 async def start(_, message):
 
     await message.reply_text(
-        "🎬 MKV → MP4 REMUX BOT\n\n"
-        "Send MKV video under 500MB"
+        "🎬 MKV → MP4 + CATBOX BOT\n\n"
+        "Send MKV video under 500MB\n"
+        "I will convert and upload to Catbox."
     )
+
+
+# catbox uploader
+def upload_catbox(file):
+
+    url = "https://catbox.moe/user/api.php"
+
+    data = {
+        "reqtype": "fileupload",
+        "userhash": CATBOX_HASH
+    }
+
+    files = {
+        "fileToUpload": open(file, "rb")
+    }
+
+    r = requests.post(url, data=data, files=files)
+
+    return r.text
 
 
 @app.on_message(filters.video)
@@ -78,20 +101,19 @@ async def convert(client, message):
 
     process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # ✅ FIXED PART
     if process.returncode != 0:
         await status.edit("❌ Remux failed")
         return
 
-    start = time.time()
+    await status.edit("☁ Uploading to Catbox...")
 
-    await message.reply_video(
-        output,
-        caption="✅ MKV ➜ MP4 Completed",
-        progress=progress,
-        progress_args=(status, start, "📤 Uploading")
+    link = upload_catbox(output)
+
+    await message.reply_text(
+        f"✅ Upload Complete\n\n🔗 {link}"
     )
 
+    # auto delete files
     os.remove(file_path)
     os.remove(output)
 
