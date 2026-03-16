@@ -1,14 +1,18 @@
 import os
 import time
-import asyncio
 import subprocess
 from pyrogram import Client, filters
 
-API_ID = 123456
-API_HASH = "YOUR_API_HASH"
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-app = Client("remuxbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client(
+    "remuxbot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
+)
 
 
 async def progress(current, total, message, start, text):
@@ -16,35 +20,53 @@ async def progress(current, total, message, start, text):
     now = time.time()
     diff = now - start
 
-    if round(diff % 2) == 0:
+    if diff % 2 < 1:
         percent = current * 100 / total
         bar = "█" * int(percent / 5) + "░" * (20 - int(percent / 5))
 
+        speed = current / diff / 1024 / 1024
+        done = current / 1024 / 1024
+        total_mb = total / 1024 / 1024
+
         await message.edit(
             f"{text}\n\n"
-            f"[{bar}] {percent:.2f}%\n"
-            f"{current//1024//1024}MB / {total//1024//1024}MB"
+            f"[{bar}] {percent:.2f}%\n\n"
+            f"⚡ Speed: {speed:.2f} MB/s\n"
+            f"📦 {done:.2f}/{total_mb:.2f} MB"
         )
 
 
+@app.on_message(filters.command("start"))
+async def start(_, message):
+
+    await message.reply_text(
+        "🎬 **MKV → MP4 REMUX BOT**\n\n"
+        "Send any **MKV video** and I will convert it to **MP4 instantly**.\n\n"
+        "⚡ Max Size: 500MB\n"
+        "⚡ No Quality Loss\n"
+        "⚡ Fast Container Change\n"
+        "⚡ Real Time Progress"
+    )
+
+
 @app.on_message(filters.video)
-async def remux(client, message):
+async def convert(client, message):
 
-    file_size = message.video.file_size
+    size = message.video.file_size
 
-    if file_size > 500 * 1024 * 1024:
-        return await message.reply("❌ Max file size 500MB")
+    if size > 500 * 1024 * 1024:
+        return await message.reply("❌ File must be under 500MB")
 
-    msg = await message.reply("📥 Starting download...")
+    status = await message.reply("📥 Starting Download...")
 
     start = time.time()
 
     file_path = await message.download(
         progress=progress,
-        progress_args=(msg, start, "📥 Downloading")
+        progress_args=(status, start, "📥 Downloading")
     )
 
-    await msg.edit("⚡ Remuxing MKV → MP4...")
+    await status.edit("⚙️ Remuxing MKV → MP4...")
 
     output = file_path.rsplit(".", 1)[0] + ".mp4"
 
@@ -63,15 +85,15 @@ async def remux(client, message):
 
     await message.reply_video(
         output,
-        caption="✅ MKV → MP4 Remux Complete",
+        caption="✅ MKV ➜ MP4 Completed",
         progress=progress,
-        progress_args=(msg, start, "📤 Uploading MP4")
+        progress_args=(status, start, "📤 Uploading")
     )
 
     os.remove(file_path)
     os.remove(output)
 
-    await msg.delete()
+    await status.delete()
 
 
 app.run()
