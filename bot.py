@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from cachetools import TTLCache
 import aiohttp
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import (
     Message, InlineKeyboardButton, InlineKeyboardMarkup,
     CallbackQuery
@@ -186,7 +186,7 @@ async def search_command(client: Client, message: Message):
     query = " ".join(message.command[1:])
     await perform_search(message, query)
 
-@app.on_message(filters.text)  # Fixed: removed & ~filters.command
+@app.on_message(filters.text)
 async def text_handler(client: Client, message: Message):
     # Agar message command hai to ignore karo
     if message.text.startswith('/'):
@@ -486,12 +486,15 @@ async def stats_command(client: Client, message: Message):
 async def main():
     logger.info("Starting Anime Bot with Pyrogram...")
     try:
-        await app.run()
+        await app.start()
+        logger.info("Bot started! Press Ctrl+C to stop.")
+        await idle()  # Wait until the bot is stopped
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
     finally:
+        await app.stop()
         await scraper.close()
         logger.info("Cleanup done")
 
