@@ -5,7 +5,11 @@ import asyncio
 import subprocess
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from config import *
+
+# 🔐 ENV VARIABLES (Railway me set karna)
+API_ID = int(os.getenv("API_ID", "0"))
+API_HASH = os.getenv("API_HASH", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 bot = Client(
     "ultra_fast_bot",
@@ -14,22 +18,39 @@ bot = Client(
     bot_token=BOT_TOKEN
 )
 
-# 🔍 get codec
+# 🟢 START COMMAND
+@bot.on_message(filters.command("start"))
+async def start(client, message: Message):
+    await message.reply_text(
+        "👋 Hello Bro!\n\n"
+        "🎬 Send H.265 video\n"
+        "⚡ I convert to H.264 (Ultra Fast)\n"
+        "📊 Real-time Progress\n"
+        "🗑 Auto delete after upload"
+    )
+
+# 🔍 GET CODEC
 def get_codec(file):
     cmd = f'ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "{file}"'
     return subprocess.getoutput(cmd).strip()
 
-# ⏱ get duration
+# ⏱ GET DURATION
 def get_duration(file):
     cmd = f'ffprobe -v error -show_entries format=duration -of csv=p=0 "{file}"'
-    return float(subprocess.getoutput(cmd))
+    try:
+        return float(subprocess.getoutput(cmd))
+    except:
+        return 0
 
-# 🧮 convert time string to seconds
-def time_to_seconds(time_str):
-    h, m, s = time_str.split(":")
-    return float(h)*3600 + float(m)*60 + float(s)
+# ⏳ TIME → SECONDS
+def time_to_seconds(t):
+    try:
+        h, m, s = t.split(":")
+        return float(h)*3600 + float(m)*60 + float(s)
+    except:
+        return 0
 
-# ⚡ convert with REAL progress
+# ⚡ CONVERT WITH REAL PROGRESS
 async def convert_video(input_file, output_file, duration, msg):
     cmd = [
         "ffmpeg",
@@ -46,7 +67,7 @@ async def convert_video(input_file, output_file, duration, msg):
         stderr=asyncio.subprocess.PIPE
     )
 
-    start = time.time()
+    start_time = time.time()
     last_update = 0
 
     while True:
@@ -54,23 +75,23 @@ async def convert_video(input_file, output_file, duration, msg):
         if not line:
             break
 
-        line = line.decode()
+        line = line.decode(errors="ignore")
 
         if "time=" in line:
             match = re.search(r"time=(\d+:\d+:\d+\.\d+)", line)
-            if match:
-                current_time = time_to_seconds(match.group(1))
-                percent = (current_time / duration) * 100
+            if match and duration > 0:
+                current = time_to_seconds(match.group(1))
+                percent = min((current / duration) * 100, 100)
 
-                elapsed = time.time() - start
-                speed = current_time / elapsed if elapsed > 0 else 0
-                eta = (duration - current_time) / speed if speed > 0 else 0
+                elapsed = time.time() - start_time
+                speed = current / elapsed if elapsed > 0 else 0
+                eta = (duration - current) / speed if speed > 0 else 0
 
-                # update every 2 sec
                 if time.time() - last_update > 2:
                     last_update = time.time()
 
-                    bar = "█" * int(percent // 5) + "░" * (20 - int(percent // 5))
+                    filled = int(percent // 5)
+                    bar = "█" * filled + "░" * (20 - filled)
 
                     text = (
                         f"⚙️ Converting...\n\n"
@@ -86,42 +107,59 @@ async def convert_video(input_file, output_file, duration, msg):
 
     await process.wait()
 
-# 🎬 handler
+# 🎬 VIDEO HANDLER
 @bot.on_message(filters.video)
 async def handler(client, message: Message):
     msg = await message.reply("📥 Downloading...")
 
-    file_path = await message.download()
+    try:
+        # 📥 DOWNLOAD
+        file_path = await message.download()
 
-    codec = get_codec(file_path)
+        # 🔍 CHECK CODEC
+        codec = get_codec(file_path)
 
-    if codec == "h264":
-        await msg.edit("✅ Already H.264, Uploading...")
-        sent = await message.reply_video(file_path)
+        # ✅ SKIP IF ALREADY H264
+        if codec == "h264":
+            await msg.edit("✅ Already H.264\n📤 Uploading...")
+            sent = await message.reply_video(file_path)
 
+            await asyncio.sleep(1)
+            await sent.delete()
+            os.remove(file_path)
+
+            await msg.edit("🗑 Cleaned ⚡")
+            return
+
+        # ⏱ DURATION
+        duration = get_duration(file_path)
+
+        await msg.edit("🔄 Starting Conversion...")
+
+        output = file_path.rsplit(".", 1)[0] + "_converted.mp4"
+
+        # ⚡ CONVERT
+        await convert_video(file_path, output, duration, msg)
+
+        # 📤 UPLOAD
+        await msg.edit("📤 Uploading...")
+
+        sent = await message.reply_video(output)
+
+        # 🗑 AUTO DELETE
         await asyncio.sleep(1)
         await sent.delete()
-        os.remove(file_path)
-        return
 
-    duration = get_duration(file_path)
+        # 🧹 CLEAN FILES
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        if os.path.exists(output):
+            os.remove(output)
 
-    await msg.edit("🔄 Starting Conversion...")
+        await msg.edit("✅ Done ⚡\n🗑 Files Deleted")
 
-    output = file_path.rsplit(".", 1)[0] + "_converted.mp4"
+    except Exception as e:
+        await msg.edit(f"❌ Error:\n{str(e)}")
 
-    await convert_video(file_path, output, duration, msg)
-
-    await msg.edit("📤 Uploading...")
-
-    sent = await message.reply_video(output)
-
-    await asyncio.sleep(1)
-    await sent.delete()
-
-    os.remove(file_path)
-    os.remove(output)
-
-    await msg.edit("✅ Done ⚡ (Auto Cleaned)")
-
+# 🚀 RUN BOT
 bot.run()
