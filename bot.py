@@ -1,582 +1,156 @@
 import os
 import asyncio
 import logging
-from typing import Dict, List, Optional
 from dotenv import load_dotenv
-from cachetools import TTLCache
-import aiohttp
-from pyrogram import Client, filters, idle
-from pyrogram.types import (
-    Message, InlineKeyboardButton, InlineKeyboardMarkup,
-    CallbackQuery
-)
+from pyrogram import Client, filters
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ParseMode
-from pyrogram.errors import FloodWait
 
-# Load environment variables
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-PORT = int(os.getenv("PORT", 8080))  # Railway provides PORT
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
-    logger.error("Missing required environment variables!")
+    logger.error("Missing environment variables!")
     exit(1)
 
-# Initialize Pyrogram Client with webhook settings
+# Initialize Client
 app = Client(
     "anime_bot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-    # Webhook specific settings
-    in_memory=True,  # Avoid file system issues on Railway
-    sleep_threshold=60
+    bot_token=BOT_TOKEN
 )
 
-# Cache
-search_cache = TTLCache(maxsize=100, ttl=3600)
-episode_cache = TTLCache(maxsize=200, ttl=7200)
-user_sessions = {}
+# ==================== Start Message ====================
+START_TEXT = """
+🌟 **Ram Ram {name}!** 🌟
 
-# ==================== Scraper Class ====================
+Main **Anime Bot** hoon!
 
-class AnimeScraper:
-    def __init__(self):
-        self.session = None
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-    
-    async def get_session(self):
-        if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession(headers=self.headers)
-        return self.session
-    
-    async def search_anime(self, query: str) -> List[Dict]:
-        """Search anime (simulated for demo)"""
-        await asyncio.sleep(1)
-        return [
-            {
-                "id": "naruto",
-                "title": "Naruto",
-                "year": "2002",
-                "status": "Completed",
-                "episodes": 220,
-                "image": "https://via.placeholder.com/150"
-            },
-            {
-                "id": "one-piece",
-                "title": "One Piece",
-                "year": "1999",
-                "status": "Ongoing",
-                "episodes": 1000,
-                "image": "https://via.placeholder.com/150"
-            },
-            {
-                "id": "bleach",
-                "title": "Bleach",
-                "year": "2004",
-                "status": "Completed",
-                "episodes": 366,
-                "image": "https://via.placeholder.com/150"
-            }
-        ]
-    
-    async def get_episode_links(self, anime_id: str, episode: int) -> Dict:
-        """Get download/stream links (simulated)"""
-        await asyncio.sleep(0.5)
-        return {
-            "download": {
-                "360p": f"https://example.com/{anime_id}/ep{episode}/360.mp4",
-                "480p": f"https://example.com/{anime_id}/ep{episode}/480.mp4",
-                "720p": f"https://example.com/{anime_id}/ep{episode}/720.mp4",
-                "1080p": f"https://example.com/{anime_id}/ep{episode}/1080.mp4"
-            },
-            "stream": {
-                "HD": f"https://example.com/stream/{anime_id}/{episode}/hd",
-                "SD": f"https://example.com/stream/{anime_id}/{episode}/sd"
-            }
-        }
-    
-    async def close(self):
-        if self.session and not self.session.closed:
-            await self.session.close()
-
-scraper = AnimeScraper()
-
-# ==================== Helper Functions ====================
-
-def progress_keyboard(percent: int, action: str, data: str) -> InlineKeyboardMarkup:
-    filled = percent // 10
-    empty = 10 - filled
-    bar = "█" * filled + "░" * empty
-    text = f"{bar} {percent}%"
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text, callback_data="noop")],
-        [
-            InlineKeyboardButton("⏸️ Pause", callback_data=f"pause_{action}_{data}"),
-            InlineKeyboardButton("⏹️ Stop", callback_data=f"stop_{action}_{data}")
-        ],
-        [InlineKeyboardButton("◀️ Back", callback_data="main_menu")]
-    ])
-    return keyboard
-
-def main_menu_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔍 Search", callback_data="menu_search"),
-            InlineKeyboardButton("⭐ Favorites", callback_data="menu_fav")
-        ],
-        [
-            InlineKeyboardButton("📜 History", callback_data="menu_history"),
-            InlineKeyboardButton("⚙️ Settings", callback_data="menu_settings")
-        ],
-        [
-            InlineKeyboardButton("🆕 Recent", callback_data="menu_recent"),
-            InlineKeyboardButton("📥 Batch", callback_data="menu_batch")
-        ],
-        [
-            InlineKeyboardButton("❓ Help", callback_data="menu_help"),
-            InlineKeyboardButton("ℹ️ About", callback_data="menu_about")
-        ]
-    ])
-    return keyboard
-
-# ==================== START MESSAGE ====================
-START_MESSAGE = """
-🌟 **Welcome {user_name}!** 🌟
-
-I'm your **Anime Bot** with real-time progress tracking!
-
-🔍 **Send me any anime name to start searching**
-Example: `Naruto`, `One Piece`, `Bleach`
+🔍 **Bas anime name bhejo:**
+`Naruto`, `One Piece`, `Jujutsu Kaisen`
 
 📌 **Commands:**
-• /start - Show this menu
-• /help - Get help
-• /search <name> - Search anime
-• /stats - Bot statistics
-
-⚡ **Real-time progress bars • Download links • Stream links**
-
-✨ **Let's start watching!**
+/start - Start
+/help - Help
+/search - Search
 """
 
-HELP_MESSAGE = """
-📚 **Help Guide**
+HELP_TEXT = """
+📚 **Help**
 
-**How to use:**
-1. Send anime name directly
-2. Watch progress bar
-3. Click on results
-4. Choose episode
-5. Get links!
+• Anime name bhejo - Search karega
+• /search [name] - Search
+• Buttons use karo navigate karne ke liye
 
-**Commands:**
-• /start - Main menu
-• /help - This help
-• /search <name> - Search anime
-• /stats - Bot stats
-
-**Tips:**
-• Use full anime names
-• Add year for accuracy
-• Use pause/stop if needed
-
-**Features:**
-• Real-time progress
-• Download links
-• Stream links
-• Paginated episodes
-• Favorites (soon)
-• History (soon)
+Example: `Naruto` ya `/search Naruto`
 """
 
-# ==================== Command Handlers ====================
+# ==================== Handlers ====================
 
 @app.on_message(filters.command("start"))
-async def start_command(client: Client, message: Message):
-    user = message.from_user
+async def start_cmd(client: Client, message: Message):
+    logger.info(f"Start command from {message.from_user.id}")
     await message.reply_text(
-        START_MESSAGE.format(user_name=user.first_name),
-        reply_markup=main_menu_keyboard(),
+        START_TEXT.format(name=message.from_user.first_name),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔍 Search", callback_data="search"),
+            InlineKeyboardButton("❓ Help", callback_data="help")
+        ]]),
         parse_mode=ParseMode.MARKDOWN
     )
-    logger.info(f"User {user.id} started the bot")
 
 @app.on_message(filters.command("help"))
-async def help_command(client: Client, message: Message):
-    await message.reply_text(
-        HELP_MESSAGE,
-        reply_markup=main_menu_keyboard(),
-        parse_mode=ParseMode.MARKDOWN
-    )
+async def help_cmd(client: Client, message: Message):
+    logger.info(f"Help command from {message.from_user.id}")
+    await message.reply_text(HELP_TEXT, parse_mode=ParseMode.MARKDOWN)
 
 @app.on_message(filters.command("search"))
-async def search_command(client: Client, message: Message):
+async def search_cmd(client: Client, message: Message):
     if len(message.command) < 2:
-        await message.reply_text("❌ Please provide an anime name!\nExample: `/search Naruto`")
+        await message.reply_text("❌ Anime name batao!\nExample: `/search Naruto`")
         return
+    
     query = " ".join(message.command[1:])
-    await perform_search(message, query)
-
-@app.on_message(filters.command("stats"))
-async def stats_command(client: Client, message: Message):
-    await message.reply_text(
-        f"📊 **Bot Statistics**\n\n"
-        f"👥 Active users: {len(user_sessions)}\n"
-        f"💾 Cache: {len(search_cache)} searches, {len(episode_cache)} episodes\n"
-        f"⚡ Status: Running smoothly\n"
-        f"⏰ Uptime: Just started",
-        parse_mode=ParseMode.MARKDOWN
-    )
+    logger.info(f"Search command: {query}")
+    
+    msg = await message.reply_text(f"🔍 Searching for `{query}`...")
+    await asyncio.sleep(1)
+    await msg.edit_text(f"❌ `{query}` nahi mila!\nTry different spelling.")
 
 @app.on_message(filters.text)
 async def text_handler(client: Client, message: Message):
-    # Ignore commands
     if message.text.startswith('/'):
         return
     
     query = message.text.strip()
+    logger.info(f"Text search: {query}")
+    
     if len(query) < 2:
-        await message.reply_text("❌ Please enter at least 2 characters!")
+        await message.reply_text("❌ Kam se kam 2 characters daalo!")
         return
     
-    logger.info(f"Search query from {message.from_user.id}: {query}")
-    await perform_search(message, query)
-
-async def perform_search(message: Message, query: str):
-    """Search with progress animation"""
-    user_id = message.from_user.id
-    
-    # Initial progress message
-    status_msg = await message.reply_text(
-        f"🔍 **Searching:** `{query}`\n\n"
-        f"Progress: 0%",
-        reply_markup=progress_keyboard(0, "search", query),
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    # Simulate progress updates
-    for percent in range(10, 101, 10):
-        await asyncio.sleep(0.3)
-        try:
-            await status_msg.edit_text(
-                f"🔍 **Searching:** `{query}`\n\n"
-                f"Progress: {percent}%",
-                reply_markup=progress_keyboard(percent, "search", query),
-                parse_mode=ParseMode.MARKDOWN
-            )
-        except:
-            pass
-    
-    # Perform actual search
-    results = await scraper.search_anime(query)
-    
-    if not results:
-        await status_msg.edit_text(
-            f"❌ No results for **{query}**",
-            reply_markup=main_menu_keyboard(),
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    # Store results in session
-    user_sessions[user_id] = {"results": results, "page": 1}
-    
-    # Display results
-    text = f"📺 **Found {len(results)} results:**\n\n"
-    keyboard_buttons = []
-    
-    for idx, anime in enumerate(results[:5], 1):
-        text += f"**{idx}.** {anime['title']} ({anime['year']}) - {anime['status']}\n"
-        keyboard_buttons.append([
-            InlineKeyboardButton(f"{idx}. {anime['title'][:20]}", callback_data=f"anime_{anime['id']}")
-        ])
-    
-    keyboard_buttons.append([InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
-    
-    await status_msg.edit_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard_buttons),
-        parse_mode=ParseMode.MARKDOWN
+    msg = await message.reply_text(f"🔍 Searching for `{query}`...")
+    await asyncio.sleep(1)
+    await msg.edit_text(
+        f"❌ `{query}` nahi mila!\n"
+        f"• Spelling check karo\n"
+        f"• /search {query} try karo"
     )
 
-# ==================== Callback Handlers ====================
+# ==================== Callbacks ====================
 
 @app.on_callback_query()
-async def callback_handler(client: Client, callback: CallbackQuery):
+async def callback_handler(client: Client, callback):
     data = callback.data
-    user_id = callback.from_user.id
-    message = callback.message
-    
     await callback.answer()
     
-    # Main menu
-    if data == "main_menu":
-        await message.edit_text(
-            "🏠 **Main Menu**",
-            reply_markup=main_menu_keyboard(),
-            parse_mode=ParseMode.MARKDOWN
-        )
-    
-    # Search menu
-    elif data == "menu_search":
-        await message.edit_text(
-            "🔍 **Send me the anime name:**",
+    if data == "search":
+        await callback.message.edit_text(
+            "🔍 **Anime name bhejo:**",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("◀️ Back", callback_data="main_menu")
+                InlineKeyboardButton("◀️ Back", callback_data="back")
             ]]),
             parse_mode=ParseMode.MARKDOWN
         )
-    
-    # Help menu
-    elif data == "menu_help":
-        await message.edit_text(
-            HELP_MESSAGE,
-            reply_markup=main_menu_keyboard(),
+    elif data == "help":
+        await callback.message.edit_text(
+            HELP_TEXT,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("◀️ Back", callback_data="back")
+            ]]),
             parse_mode=ParseMode.MARKDOWN
         )
-    
-    # About menu
-    elif data == "menu_about":
-        about_text = """
-ℹ️ **About Anime Bot**
-
-**Version:** 3.0
-**Framework:** Pyrogram
-**Developer:** @YourUsername
-**Hosting:** Railway
-
-**Features:**
-• Real-time progress bars
-• Download/Stream links
-• Multiple quality options
-• Paginated episodes
-
-✨ **Enjoy Watching!**
-        """
-        await message.edit_text(
-            about_text,
-            reply_markup=main_menu_keyboard(),
+    elif data == "back":
+        await callback.message.edit_text(
+            START_TEXT.format(name=callback.from_user.first_name),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔍 Search", callback_data="search"),
+                InlineKeyboardButton("❓ Help", callback_data="help")
+            ]]),
             parse_mode=ParseMode.MARKDOWN
         )
-    
-    # Placeholder for other menus
-    elif data in ["menu_fav", "menu_history", "menu_settings", "menu_recent", "menu_batch"]:
-        await message.edit_text(
-            f"🛠️ **Coming Soon!**\n\nThis feature is under development.",
-            reply_markup=main_menu_keyboard(),
-            parse_mode=ParseMode.MARKDOWN
-        )
-    
-    # Anime details
-    elif data.startswith("anime_"):
-        anime_id = data.replace("anime_", "")
-        
-        # Progress simulation
-        await message.edit_text(
-            "📊 **Loading anime details...**\n\nProgress: 0%",
-            reply_markup=progress_keyboard(0, "details", anime_id),
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        for percent in range(10, 101, 10):
-            await asyncio.sleep(0.2)
-            try:
-                await message.edit_text(
-                    f"📊 **Loading anime details...**\n\nProgress: {percent}%",
-                    reply_markup=progress_keyboard(percent, "details", anime_id),
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            except:
-                pass
-        
-        text = """
-📺 **Naruto**
-
-📝 **Description:** Naruto Uzumaki, a mischievous adolescent ninja, struggles as he searches for recognition and dreams of becoming the Hokage.
-
-🎭 **Genre:** Action, Adventure, Comedy
-📅 **Year:** 2002
-📊 **Status:** Completed
-🎬 **Episodes:** 220
-⭐ **Rating:** 8.3/10
-        """
-        
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("📺 Episodes", callback_data=f"eps_{anime_id}_1"),
-                InlineKeyboardButton("📥 Download", callback_data=f"download_{anime_id}")
-            ],
-            [
-                InlineKeyboardButton("⭐ Favorite", callback_data=f"fav_{anime_id}"),
-                InlineKeyboardButton("🔍 Similar", callback_data=f"similar_{anime_id}")
-            ],
-            [InlineKeyboardButton("◀️ Back", callback_data="main_menu")]
-        ])
-        
-        await message.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    
-    # Episodes list
-    elif data.startswith("eps_"):
-        parts = data.split("_")
-        anime_id = parts[1]
-        page = int(parts[2])
-        
-        await message.edit_text(
-            f"📋 **Loading episodes...**\n\nProgress: 0%",
-            reply_markup=progress_keyboard(0, "episodes", anime_id),
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        for percent in range(10, 101, 10):
-            await asyncio.sleep(0.15)
-            try:
-                await message.edit_text(
-                    f"📋 **Loading episodes...**\n\nProgress: {percent}%",
-                    reply_markup=progress_keyboard(percent, "episodes", anime_id),
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            except:
-                pass
-        
-        start_ep = (page - 1) * 20 + 1
-        end_ep = min(start_ep + 19, 220)
-        
-        keyboard = []
-        row = []
-        for ep in range(start_ep, end_ep + 1):
-            row.append(InlineKeyboardButton(str(ep), callback_data=f"ep_{anime_id}_{ep}"))
-            if len(row) == 5:
-                keyboard.append(row)
-                row = []
-        if row:
-            keyboard.append(row)
-        
-        nav = []
-        if page > 1:
-            nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"eps_{anime_id}_{page-1}"))
-        nav.append(InlineKeyboardButton(f"📄 {page}/11", callback_data="noop"))
-        if page < 11:
-            nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"eps_{anime_id}_{page+1}"))
-        keyboard.append(nav)
-        keyboard.append([InlineKeyboardButton("◀️ Back", callback_data=f"anime_{anime_id}")])
-        
-        await message.edit_text(
-            f"📋 **Episodes {start_ep}-{end_ep}**",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.MARKDOWN
-        )
-    
-    # Episode links
-    elif data.startswith("ep_"):
-        parts = data.split("_")
-        anime_id = parts[1]
-        episode = parts[2]
-        
-        await message.edit_text(
-            f"🔍 **Getting links for Episode {episode}...**\n\nProgress: 0%",
-            reply_markup=progress_keyboard(0, "links", f"{anime_id}_{episode}"),
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        statuses = ["Searching sources...", "Extracting links...", "Almost done..."]
-        for i in range(1, 11):
-            await asyncio.sleep(0.25)
-            status = statuses[min(i//4, 2)]
-            try:
-                await message.edit_text(
-                    f"🔍 **Getting links for Episode {episode}...**\n\n"
-                    f"Progress: {i*10}%\n"
-                    f"Status: {status}",
-                    reply_markup=progress_keyboard(i*10, "links", f"{anime_id}_{episode}"),
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            except:
-                pass
-        
-        links = await scraper.get_episode_links(anime_id, int(episode))
-        
-        text = f"📺 **Naruto - Episode {episode}**\n\n"
-        keyboard = []
-        
-        if links["download"]:
-            text += "📥 **Download Links:**\n"
-            for quality, url in links["download"].items():
-                text += f"• {quality}\n"
-                keyboard.append([InlineKeyboardButton(f"⬇️ Download {quality}", url=url)])
-            text += "\n"
-        
-        if links["stream"]:
-            text += "📺 **Stream Links:**\n"
-            for quality, url in links["stream"].items():
-                text += f"• {quality}\n"
-                keyboard.append([InlineKeyboardButton(f"▶️ Stream {quality}", url=url)])
-            text += "\n"
-        
-        keyboard.append([
-            InlineKeyboardButton("◀️ Prev", callback_data=f"ep_{anime_id}_{int(episode)-1}"),
-            InlineKeyboardButton("Next ▶️", callback_data=f"ep_{anime_id}_{int(episode)+1}")
-        ])
-        keyboard.append([
-            InlineKeyboardButton("📋 Episodes", callback_data=f"eps_{anime_id}_1"),
-            InlineKeyboardButton("◀️ Back", callback_data=f"anime_{anime_id}")
-        ])
-        
-        await message.edit_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
-    
-    # Progress control
-    elif data.startswith("pause_"):
-        await callback.answer("⏸️ Paused")
-    elif data.startswith("stop_"):
-        await callback.answer("⏹️ Stopped")
-        await message.edit_text(
-            "⏹️ Operation cancelled.",
-            reply_markup=main_menu_keyboard()
-        )
-    elif data == "noop":
-        await callback.answer()
 
 # ==================== Main ====================
 
 async def main():
-    logger.info("Starting Anime Bot with Pyrogram...")
+    logger.info("Starting bot...")
     try:
-        # Start bot
         await app.start()
         logger.info("Bot started! Press Ctrl+C to stop.")
-        
-        # Keep the bot running
-        await idle()
-        
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        await asyncio.Event().wait()  # Run forever
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"Error: {e}")
     finally:
-        # Stop bot and cleanup
         await app.stop()
-        await scraper.close()
-        logger.info("Cleanup done")
 
 if __name__ == "__main__":
-    # For Railway, we need to run the async main function
     asyncio.run(main())
