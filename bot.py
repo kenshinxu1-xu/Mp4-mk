@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import aiohttp
+import re
 from urllib.parse import quote, urljoin
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -25,36 +26,50 @@ if not BOT_TOKEN:
     logger.error("No BOT_TOKEN found!")
     exit(1)
 
-# Cache (30 minutes for search, 1 hour for episodes)
+# Cache
 search_cache = TTLCache(maxsize=50, ttl=1800)
 episode_cache = TTLCache(maxsize=100, ttl=3600)
 link_cache = TTLCache(maxsize=200, ttl=7200)
 
-# ==================== ANIME SOURCES CONFIGURATION ====================
-SOURCES = [
+# ==================== SITE CONFIGURATIONS ====================
+SITES = [
     {
-        'name': 'GogoAnime',
-        'search_url': 'https://gogoanime3.co/search.html?keyword={}',
-        'base_url': 'https://gogoanime3.co',
-        'type': 'gogoanime'
-    },
-    {
-        'name': 'AnimeDubHindi',
+        'name': '✨ AnimeDubHindi',
         'search_url': 'https://animedubhindi.me/?s={}',
         'base_url': 'https://animedubhindi.me',
-        'type': 'wordpress'
+        'type': 'wordpress',
+        'search_selector': 'article h2 a',
+        'episode_selector': 'div.eplister a',
+        'download_selector': 'div.download-links a, div.mirror_link a, a[href*="drive.google"], a[href*="mega.nz"]'
     },
     {
-        'name': 'AnimeSalt',
+        'name': '⚡ GogoAnime',
+        'search_url': 'https://gogoanime3.co/search.html?keyword={}',
+        'base_url': 'https://gogoanime3.co',
+        'type': 'gogoanime',
+        'search_selector': 'div.img a',
+        'episode_selector': 'ul#episode_related li a',
+        'download_selector': 'div.download-links a'
+    },
+    {
+        'name': '🌊 AnimeSalt',
         'search_url': 'https://animesalt.top/search?q={}',
         'base_url': 'https://animesalt.top',
-        'type': 'animesalt'
+        'type': 'animesalt',
+        'search_selector': 'a.block',
+        'title_selector': 'h3',
+        'episode_selector': 'a.episode-link',
+        'download_selector': 'a[href*="download"], a[href*="drive"], a[href*="mega"]'
     },
     {
-        'name': 'WatchAnimeWorld',
+        'name': '🎬 WatchAnimeWorld',
         'search_url': 'https://watchanimeworld.net/search?q={}',
         'base_url': 'https://watchanimeworld.net',
-        'type': 'watchanimeworld'
+        'type': 'watchanimeworld',
+        'search_selector': 'a.relative',
+        'title_selector': 'h3',
+        'episode_selector': 'a.episode',
+        'download_selector': 'a.download-link, a[href*="drive"]'
     }
 ]
 
@@ -71,7 +86,7 @@ class AnimeScraper:
         return self.session
     
     async def search_anime(self, query: str) -> list:
-        """Search anime across all sources"""
+        """Search across all sites"""
         cache_key = f"search_{query}"
         if cache_key in search_cache:
             return search_cache[cache_key]
@@ -79,72 +94,44 @@ class AnimeScraper:
         results = []
         session = await self.get_session()
         
-        for source in SOURCES:
+        for site in SITES:
             try:
-                search_url = source['search_url'].format(quote(query))
-                logger.info(f"Searching {source['name']}: {search_url}")
+                search_url = site['search_url'].format(quote(query))
+                logger.info(f"🔍 Searching {site['name']}: {search_url}")
+                
                 async with session.get(search_url, timeout=15) as resp:
                     if resp.status == 200:
                         html = await resp.text()
                         soup = BeautifulSoup(html, 'lxml')
                         
-                        if source['type'] == 'gogoanime':
-                            items = soup.select('div.img a')[:8]
-                            for item in items:
+                        # Site-specific search parsing
+                        items = soup.select(site['search_selector'])[:5]
+                        
+                        for item in items:
+                            if site['type'] == 'gogoanime':
                                 title = item.get('title', '').strip()
-                                if title:
-                                    results.append({
-                                        'title': title,
-                                        'url': urljoin(source['base_url'], item.get('href', '')),
-                                        'source': source['name'],
-                                        'source_key': source['type'],
-                                        'id': item.get('href', '').split('/')[-1]
-                                    })
-                        
-                        elif source['type'] == 'wordpress':
-                            items = soup.select('article h2 a')[:8]
-                            for item in items:
+                                link = item.get('href', '')
+                            elif site['type'] == 'wordpress':
                                 title = item.text.strip()
-                                if title:
-                                    results.append({
-                                        'title': title,
-                                        'url': item.get('href', ''),
-                                        'source': source['name'],
-                                        'source_key': source['type']
-                                    })
-                        
-                        elif source['type'] == 'animesalt':
-                            items = soup.select('a.block')[:8]
-                            for item in items:
-                                title_tag = item.select_one('h3')
-                                if title_tag:
-                                    title = title_tag.text.strip()
-                                    if title:
-                                        results.append({
-                                            'title': title,
-                                            'url': urljoin(source['base_url'], item.get('href', '')),
-                                            'source': source['name'],
-                                            'source_key': source['type']
-                                        })
-                        
-                        elif source['type'] == 'watchanimeworld':
-                            items = soup.select('a.relative')[:8]
-                            for item in items:
-                                title_tag = item.select_one('h3')
-                                if title_tag:
-                                    title = title_tag.text.strip()
-                                    if title:
-                                        results.append({
-                                            'title': title,
-                                            'url': urljoin(source['base_url'], item.get('href', '')),
-                                            'source': source['name'],
-                                            'source_key': source['type']
-                                        })
+                                link = item.get('href', '')
+                            elif site['type'] in ['animesalt', 'watchanimeworld']:
+                                title_sel = site.get('title_selector', 'h3')
+                                title_tag = item.select_one(title_sel)
+                                title = title_tag.text.strip() if title_tag else ''
+                                link = item.get('href', '')
+                            
+                            if title and link:
+                                results.append({
+                                    'title': title,
+                                    'url': urljoin(site['base_url'], link),
+                                    'site': site['name'],
+                                    'site_type': site['type']
+                                })
             except Exception as e:
-                logger.error(f"Error searching {source['name']}: {e}")
+                logger.error(f"❌ Error searching {site['name']}: {e}")
                 continue
         
-        # Remove duplicates by title (simple)
+        # Remove duplicates
         seen = set()
         unique_results = []
         for r in results:
@@ -155,73 +142,114 @@ class AnimeScraper:
         search_cache[cache_key] = unique_results
         return unique_results
     
-    async def get_episodes(self, anime_url: str, source_type: str) -> list:
-        """Get episodes list from anime page"""
-        cache_key = f"eps_{anime_url}"
+    async def get_episodes_or_movie(self, url: str, site_type: str) -> dict:
+        """Check if it's a movie or series and get episodes/downloads"""
+        cache_key = f"content_{url}"
         if cache_key in episode_cache:
             return episode_cache[cache_key]
         
-        episodes = []
+        result = {
+            'type': 'unknown',
+            'title': '',
+            'episodes': [],
+            'direct_links': []
+        }
+        
         session = await self.get_session()
         
         try:
-            async with session.get(anime_url, timeout=15) as resp:
+            async with session.get(url, timeout=15) as resp:
                 if resp.status == 200:
                     html = await resp.text()
                     soup = BeautifulSoup(html, 'lxml')
                     
-                    if source_type == 'gogoanime':
-                        ep_links = soup.select('ul#episode_related li a')
+                    # Get title
+                    title_tag = soup.find('h1') or soup.find('title')
+                    result['title'] = title_tag.text.strip() if title_tag else 'Unknown'
+                    
+                    # Check if it's a movie (look for movie indicators)
+                    is_movie = False
+                    movie_indicators = ['movie', 'film', '480p', '720p', '1080p', 'bluray', 'hdrip']
+                    page_text = soup.get_text().lower()
+                    
+                    if any(indicator in page_text for indicator in movie_indicators):
+                        is_movie = True
+                    
+                    # Try to find episodes first
+                    episodes = []
+                    site_config = next((s for s in SITES if s['type'] == site_type), None)
+                    
+                    if site_config and 'episode_selector' in site_config and not is_movie:
+                        ep_links = soup.select(site_config['episode_selector'])[:50]
                         for link in ep_links:
-                            ep_text = link.text.strip().replace('EP', '').strip()
-                            if ep_text.isdigit():
-                                episodes.append({
-                                    'number': int(ep_text),
-                                    'url': urljoin('https://gogoanime3.co', link.get('href', ''))
-                                })
-                        # Sort by number
-                        episodes.sort(key=lambda x: x['number'])
-                    
-                    elif source_type == 'wordpress':
-                        ep_links = soup.select('div.eplister a')
-                        for link in ep_links[:50]:
-                            ep_num = link.select_one('.epl-num')
-                            if ep_num and ep_num.text.strip().isdigit():
-                                episodes.append({
-                                    'number': int(ep_num.text.strip()),
-                                    'url': link.get('href', '')
-                                })
-                        episodes.sort(key=lambda x: x['number'])
-                    
-                    elif source_type == 'animesalt':
-                        ep_links = soup.select('a.episode-link')
-                        for i, link in enumerate(ep_links[:50], 1):
+                            ep_text = link.text.strip()
+                            ep_url = urljoin(url, link.get('href', ''))
+                            
+                            # Try to extract episode number
+                            ep_num = None
+                            numbers = re.findall(r'\d+', ep_text)
+                            if numbers:
+                                ep_num = int(numbers[0])
+                            
                             episodes.append({
-                                'number': i,
-                                'url': urljoin('https://animesalt.top', link.get('href', ''))
+                                'number': ep_num if ep_num else len(episodes) + 1,
+                                'url': ep_url,
+                                'text': ep_text[:30]
                             })
                     
-                    elif source_type == 'watchanimeworld':
-                        ep_links = soup.select('a.episode')
-                        for link in ep_links[:50]:
-                            ep_num = link.select_one('span.ep-number')
-                            if ep_num:
-                                num = ep_num.text.strip().replace('Episode', '').strip()
-                                if num.isdigit():
-                                    episodes.append({
-                                        'number': int(num),
-                                        'url': urljoin('https://watchanimeworld.net', link.get('href', ''))
+                    if episodes:
+                        result['type'] = 'series'
+                        result['episodes'] = episodes[:50]
+                    else:
+                        # No episodes found - treat as movie, find direct download links
+                        result['type'] = 'movie'
+                        
+                        # Find all potential download links
+                        site_config = next((s for s in SITES if s['type'] == site_type), None)
+                        download_selectors = site_config.get('download_selector', 'a[href*="drive"], a[href*="mega"], a[href*="mediafire"]')
+                        
+                        # Common download link patterns
+                        patterns = [
+                            r'https?://(?:drive\.google\.com|mega\.nz|mediafire\.com)[^\s"<>]+',
+                            r'https?://[^\s"<>]+\.(?:mp4|mkv|avi|mov)[^\s"<>]*'
+                        ]
+                        
+                        # Find using selectors
+                        for selector in download_selectors.split(','):
+                            links = soup.select(selector.strip())
+                            for link in links:
+                                href = link.get('href', '')
+                                if href and not href.startswith('#'):
+                                    result['direct_links'].append({
+                                        'text': link.text.strip()[:30] or 'Download Link',
+                                        'url': urljoin(url, href)
                                     })
-                        episodes.sort(key=lambda x: x['number'])
-            # Limit to 100 episodes max
-            episodes = episodes[:100]
-        except Exception as e:
-            logger.error(f"Error getting episodes from {anime_url}: {e}")
+                        
+                        # Find using regex patterns
+                        for pattern in patterns:
+                            matches = re.findall(pattern, html)
+                            for match in matches[:3]:  # Limit to 3 matches
+                                result['direct_links'].append({
+                                    'text': 'Direct Download',
+                                    'url': match
+                                })
+                        
+                        # Remove duplicates
+                        seen_urls = set()
+                        unique_links = []
+                        for link in result['direct_links']:
+                            if link['url'] not in seen_urls:
+                                seen_urls.add(link['url'])
+                                unique_links.append(link)
+                        result['direct_links'] = unique_links[:5]
         
-        episode_cache[cache_key] = episodes
-        return episodes
+        except Exception as e:
+            logger.error(f"❌ Error fetching content from {url}: {e}")
+        
+        episode_cache[cache_key] = result
+        return result
     
-    async def get_download_links(self, episode_url: str, source_type: str) -> dict:
+    async def get_download_links(self, episode_url: str, site_type: str) -> dict:
         """Extract download links from episode page"""
         cache_key = f"links_{episode_url}"
         if cache_key in link_cache:
@@ -236,17 +264,14 @@ class AnimeScraper:
                     html = await resp.text()
                     soup = BeautifulSoup(html, 'lxml')
                     
-                    # Common patterns across sites
-                    # Look for download links section
-                    download_section = soup.find('div', class_='download-links') or \
-                                       soup.find('div', class_='mirror_link') or \
-                                       soup.find('div', class_='dowload') or \
-                                       soup.find('div', {'id': 'download'})
+                    # Site-specific download link extraction
+                    site_config = next((s for s in SITES if s['type'] == site_type), None)
                     
-                    if download_section:
-                        for a in download_section.find_all('a', href=True):
-                            text = a.text.lower()
-                            href = a['href']
+                    if site_config and 'download_selector' in site_config:
+                        download_links = soup.select(site_config['download_selector'])
+                        for link in download_links[:5]:
+                            text = link.text.lower()
+                            href = link.get('href', '')
                             if '1080' in text or '1080p' in text:
                                 links['1080p'] = href
                             elif '720' in text or '720p' in text:
@@ -255,26 +280,24 @@ class AnimeScraper:
                                 links['480p'] = href
                             elif '360' in text or '360p' in text:
                                 links['360p'] = href
-                            elif 'mp4' in href and 'quality' not in links:
-                                links['Direct'] = href
+                            elif 'drive' in href or 'mega' in href:
+                                links['GDrive/Mega'] = href
+                            else:
+                                links[text[:10]] = href
                     
-                    # If still no links, try to find video source
+                    # Generic fallback - find any video/download links
                     if not links:
-                        video = soup.find('video')
-                        if video and video.find('source'):
-                            src = video.find('source').get('src', '')
-                            if src:
-                                links['Stream'] = src
-                    
-                    # For gogoanime, sometimes links are in iframe
-                    if not links:
-                        iframe = soup.find('iframe', src=True)
-                        if iframe:
-                            # Could be stream, but we need to follow redirects
-                            # For simplicity, store the iframe src as stream link
-                            links['Stream'] = urljoin(episode_url, iframe['src'])
+                        video_patterns = [
+                            r'https?://[^\s"<>]+\.(?:mp4|mkv|avi|mov)[^\s"<>]*',
+                            r'https?://[^\s"<>]*drive\.google\.com[^\s"<>]+',
+                            r'https?://[^\s"<>]*mega\.nz[^\s"<>]+'
+                        ]
+                        for pattern in video_patterns:
+                            matches = re.findall(pattern, html)
+                            for i, match in enumerate(matches[:3]):
+                                links[f'Link {i+1}'] = match
         except Exception as e:
-            logger.error(f"Error getting download links from {episode_url}: {e}")
+            logger.error(f"❌ Error getting links from {episode_url}: {e}")
         
         link_cache[cache_key] = links
         return links
@@ -291,14 +314,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await update.message.reply_text(
         f"👋 **Namaste {user.first_name}!**\n\n"
-        f"Main **Anime Download Bot** hoon.\n\n"
-        f"🔍 **Bas anime name bhejo** – main multiple sites se search karunga:\n"
-        f"• GogoAnime\n"
-        f"• AnimeDubHindi\n"
-        f"• AnimeSalt\n"
-        f"• WatchAnimeWorld\n\n"
-        f"Example: `Naruto`, `One Piece`, `Jujutsu Kaisen`\n\n"
-        f"✅ Results site name ke saath dikhenge!",
+        f"Main **Anime Download Bot** hoon - Real Working!\n\n"
+        f"🔍 **Bas anime name bhejo** – main 4 sites se search karunga:\n"
+        f"{chr(10).join([f'• {site}' for site in ['✨ AnimeDubHindi', '⚡ GogoAnime', '🌊 AnimeSalt', '🎬 WatchAnimeWorld']])}\n\n"
+        f"✅ **Movies aur Series** dono handle karta hoon!\n"
+        f"✅ **Real download links** - GDrive, Mega, Direct\n\n"
+        f"Example: `Jujutsu Kaisen`, `Naruto`, `One Piece`",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -308,7 +329,7 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.startswith('/') or len(query) < 3:
         return
     
-    msg = await update.message.reply_text(f"🔍 `{query}` search kar raha hoon... (4 sites check karunga)")
+    msg = await update.message.reply_text(f"🔍 `{query}` search kar raha hoon... (4 sites check kar raha hoon)")
     
     results = await scraper.search_anime(query)
     
@@ -318,20 +339,18 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💡 Tips:\n"
             f"• Spelling check karo\n"
             f"• English name try karo\n"
-            f"• Full name use karo (e.g., 'Naruto Shippuden')",
+            f"• Short name try karo (e.g., 'JJK' for Jujutsu Kaisen)",
             parse_mode=ParseMode.MARKDOWN
         )
         return
     
-    # Store results in context for callback
+    # Store results
     context.user_data['search_results'] = results
-    context.user_data['search_query'] = query
     
-    # Create inline keyboard with long buttons
+    # Create keyboard
     keyboard = []
     for idx, anime in enumerate(results[:10], 1):
-        # Display title with site name in brackets
-        btn_text = f"{idx}. [{anime['source']}] {anime['title'][:30]}"
+        btn_text = f"{idx}. {anime['site']} - {anime['title'][:25]}"
         keyboard.append([
             InlineKeyboardButton(btn_text, callback_data=f"anime_{idx-1}")
         ])
@@ -362,45 +381,62 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"📺 **{anime['title']}**\n"
-            f"🔗 Source: {anime['source']}\n\n"
-            f"📥 Episodes fetch kar raha hoon...",
+            f"📌 Site: {anime['site']}\n\n"
+            f"🔄 Content fetch kar raha hoon...",
             parse_mode=ParseMode.MARKDOWN
         )
         
-        episodes = await scraper.get_episodes(anime['url'], anime.get('source_key', 'gogoanime'))
+        content = await scraper.get_episodes_or_movie(anime['url'], anime['site_type'])
         
-        if not episodes:
+        if content['type'] == 'series' and content['episodes']:
+            user_data['episodes'] = content['episodes']
+            
+            # Create episode keyboard
+            keyboard = []
+            row = []
+            for i, ep in enumerate(content['episodes'][:30], 1):
+                btn = InlineKeyboardButton(f"Ep {ep['number']}", callback_data=f"ep_{i-1}")
+                row.append(btn)
+                if len(row) == 5:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            
+            keyboard.append([InlineKeyboardButton("◀️ Wapas search", callback_data="back_search")])
+            
             await query.edit_message_text(
-                f"❌ Episodes nahi mile!\n{anime['url']}",
+                f"📺 **{content['title']}**\n"
+                f"Total episodes: {len(content['episodes'])}\n\n"
+                f"Episode choose karo:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        
+        elif content['type'] == 'movie' and content['direct_links']:
+            # Show movie download links directly
+            keyboard = []
+            for link in content['direct_links'][:5]:
+                keyboard.append([InlineKeyboardButton(f"📥 {link['text']}", url=link['url'])])
+            
+            keyboard.append([InlineKeyboardButton("◀️ Wapas search", callback_data="back_search")])
+            
+            await query.edit_message_text(
+                f"🎬 **{content['title']}**\n"
+                f"Type: Movie\n\n"
+                f"✅ {len(content['direct_links'])} download links mile:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN,
+                disable_web_page_preview=True
+            )
+        
+        else:
+            await query.edit_message_text(
+                f"❌ Is page se kuch nahi mila!\n{anime['url']}",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("◀️ Wapas search", callback_data="back_search")
                 ]])
             )
-            return
-        
-        user_data['episodes'] = episodes
-        
-        # Create episode keyboard (5 per row, long buttons)
-        keyboard = []
-        row = []
-        for i, ep in enumerate(episodes[:30], 1):  # Show first 30 episodes
-            btn = InlineKeyboardButton(f"Ep {ep['number']}", callback_data=f"ep_{i-1}")
-            row.append(btn)
-            if len(row) == 5:
-                keyboard.append(row)
-                row = []
-        if row:
-            keyboard.append(row)
-        
-        keyboard.append([InlineKeyboardButton("◀️ Wapas search", callback_data="back_search")])
-        
-        await query.edit_message_text(
-            f"📺 **{anime['title']}**\n"
-            f"Total episodes: {len(episodes)}\n\n"
-            f"Episode choose karo:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.MARKDOWN
-        )
     
     elif data.startswith('ep_'):
         idx = int(data.replace('ep_', ''))
@@ -414,11 +450,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ep = episodes[idx]
         
         await query.edit_message_text(
-            f"🔍 Download links fetch kar raha hoon...\n{ep['url']}",
+            f"🔍 Download links fetch kar raha hoon...",
             parse_mode=ParseMode.MARKDOWN
         )
         
-        links = await scraper.get_download_links(ep['url'], anime.get('source_key', 'gogoanime'))
+        links = await scraper.get_download_links(ep['url'], anime['site_type'])
         
         if not links:
             await query.edit_message_text(
@@ -429,7 +465,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Create buttons for each link
         keyboard = []
         for quality, url in links.items():
             btn_text = f"⬇️ {quality}"
@@ -440,18 +475,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🔍 New search", callback_data="back_search")
         ])
         
-        title = anime.get('title', 'Anime')
         await query.edit_message_text(
-            f"📺 **{title} - Episode {ep['number']}**\n\n"
-            f"✅ {len(links)} links mil gaye:\n"
-            f"• Site: {anime.get('source', 'Unknown')}",
+            f"📺 **{anime.get('title', 'Anime')} - Episode {ep['number']}**\n\n"
+            f"✅ {len(links)} links mil gaye:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN,
             disable_web_page_preview=True
         )
     
     elif data == "back_ep":
-        # Go back to episodes list
+        # Go back to episodes
         episodes = user_data.get('episodes', [])
         anime = user_data.get('current_anime', {})
         
@@ -477,13 +510,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif data == "back_search":
-        # Clear relevant data and ask for new search
         user_data.pop('search_results', None)
         user_data.pop('episodes', None)
         user_data.pop('current_anime', None)
         await query.edit_message_text(
             "🔍 **Anime name bhejo:**\n"
-            "Example: `Naruto`, `One Piece`, `Jujutsu Kaisen`",
+            "Example: `Jujutsu Kaisen`, `Naruto`, `One Piece`",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -507,17 +539,16 @@ async def main():
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_error_handler(error_handler)
     
-    logger.info("Bot starting... Press Ctrl+C to stop.")
+    logger.info("🤖 Bot starting... Press Ctrl+C to stop.")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
     
-    # Keep running
     try:
         while True:
             await asyncio.sleep(3600)
     except KeyboardInterrupt:
-        logger.info("Stopping bot...")
+        logger.info("🛑 Stopping bot...")
     finally:
         await app.stop()
         await app.shutdown()
