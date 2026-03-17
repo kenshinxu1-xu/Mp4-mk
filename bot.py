@@ -62,7 +62,6 @@ class AnimeScraper:
     
     async def search_anime(self, query: str) -> List[Dict]:
         """Search anime (simulated for demo)"""
-        # In production, implement actual scraping
         await asyncio.sleep(1)  # Simulate network delay
         return [
             {
@@ -187,8 +186,12 @@ async def search_command(client: Client, message: Message):
     query = " ".join(message.command[1:])
     await perform_search(message, query)
 
-@app.on_message(filters.text & ~filters.command)
+@app.on_message(filters.text)  # Fixed: removed & ~filters.command
 async def text_handler(client: Client, message: Message):
+    # Agar message command hai to ignore karo
+    if message.text.startswith('/'):
+        return
+    
     query = message.text.strip()
     if len(query) < 2:
         await message.reply_text("❌ Please enter at least 2 characters!")
