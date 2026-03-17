@@ -1,3 +1,9 @@
-pyrogram
-tgcrypto
-PyAniDL
+python-telegram-bot==20.7
+py-anidl==0.1.5
+ani-scrapy==0.2.1
+python-dotenv==1.0.0
+requests==2.31.0
+beautifulsoup4==4.12.2
+aiohttp==3.9.1
+cachetools==5.3.1
+pytz==2023.3
