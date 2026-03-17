@@ -59,8 +59,54 @@ async def convert_video(input_file, output_file, duration, msg):
         "-preset", "ultrafast",
         "-crf", "28",
         "-c:a", "copy",
+        "-progress", "pipe:1",   # 🔥 IMPORTANT
+        "-nostats",
         output_file
     ]
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL
+    )
+
+    start_time = time.time()
+    last_update = 0
+
+    while True:
+        line = await process.stdout.readline()
+        if not line:
+            break
+
+        line = line.decode().strip()
+
+        if "out_time=" in line:
+            time_str = line.split("=")[1]
+
+            current = time_to_seconds(time_str)
+            percent = min((current / duration) * 100, 100)
+
+            elapsed = time.time() - start_time
+            speed = current / elapsed if elapsed > 0 else 0
+            eta = (duration - current) / speed if speed > 0 else 0
+
+            if time.time() - last_update > 2:
+                last_update = time.time()
+
+                filled = int(percent // 5)
+                bar = "█" * filled + "░" * (20 - filled)
+
+                try:
+                    await msg.edit_text(
+                        f"⚙️ Converting...\n\n"
+                        f"[{bar}] {percent:.1f}%\n"
+                        f"⏱ ETA: {int(eta)} sec\n"
+                        f"🚀 Speed: {speed:.2f}x"
+                    )
+                except:
+                    pass
+
+    await process.wait()
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -162,4 +208,4 @@ async def handler(client, message: Message):
         await msg.edit(f"❌ Error:\n{str(e)}")
 
 # 🚀 RUN BOT
-bot.run()
+bot.run(print("FFmpeg started"))
