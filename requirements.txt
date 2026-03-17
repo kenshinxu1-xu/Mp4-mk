@@ -1,14 +1,11 @@
-# Use pyrofork, not pyrogram
-pyrofork==2.3.45
+# Core
+pyrogram==2.0.106
 tgcrypto==1.2.5
 
 # Web scraping
 aiohttp==3.9.1
 beautifulsoup4==4.12.2
 httpx==0.25.1
-
-# Anime sources (custom scraper)
-cloudscraper==1.2.71
 
 # Utilities
 python-dotenv==1.0.0
