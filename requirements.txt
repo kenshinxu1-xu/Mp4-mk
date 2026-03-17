@@ -1,11 +1,10 @@
-# Core
+# Core - Pyrogram with Python 3.11 compatibility
 pyrogram==2.0.106
 tgcrypto==1.2.5
 
 # Web scraping
 aiohttp==3.9.1
 beautifulsoup4==4.12.2
-httpx==0.25.1
 
 # Utilities
 python-dotenv==1.0.0
