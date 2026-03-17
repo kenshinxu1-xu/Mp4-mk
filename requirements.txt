@@ -1,9 +1,22 @@
-python-telegram-bot==20.7
-py-anidl==0.1.5
-ani-scrapy==0.2.1
-python-dotenv==1.0.0
-requests==2.31.0
-beautifulsoup4==4.12.2
+# Core
+pyrofork==2.3.45
+tgcrypto==1.2.5
+
+# Web scraping
 aiohttp==3.9.1
+beautifulsoup4==4.12.2
+httpx==0.25.1
+cloudscraper==1.2.71
+
+# Anime sources
+anime-scraper==1.0.3
+gogoanime-api==2.1.0
+animefox==1.2.0
+
+# Utilities
+python-dotenv==1.0.0
 cachetools==5.3.1
 pytz==2023.3
+tqdm==4.66.1
+rich==13.7.0
+asyncio==3.4.3
