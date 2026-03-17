@@ -60,6 +60,13 @@ def is_h265(file_path):
     except Exception as e:
         print(f"Error checking codec: {e}")
         return False
+@app.on_message(filters.command("start"))
+async def start_handler(client: Client, message: Message):
+    await message.reply_text(
+        "<blockquote>Bhai bot ekdum zinda hai!</blockquote> 🚀\n\n"
+        "Mujhe koi bhi H.265 (HEVC) video ya document bhej, aur main usko superfast speed se H.264 mein convert kar dunga. 😎\n"
+        "Bhej jaldi apni video!"
+    )
 
 @app.on_message(filters.video | filters.document)
 async def handle_video(client: Client, message: Message):
