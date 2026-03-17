@@ -1,122 +1,127 @@
 import os
+import re
 import time
+import asyncio
 import subprocess
-import requests
 from pyrogram import Client, filters
+from pyrogram.types import Message
+from config import *
 
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CATBOX_HASH = os.environ.get("CATBOX_HASH")
-
-app = Client(
-    "remuxbot",
+bot = Client(
+    "ultra_fast_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
+# 🔍 get codec
+def get_codec(file):
+    cmd = f'ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "{file}"'
+    return subprocess.getoutput(cmd).strip()
 
-async def progress(current, total, message, start, text):
+# ⏱ get duration
+def get_duration(file):
+    cmd = f'ffprobe -v error -show_entries format=duration -of csv=p=0 "{file}"'
+    return float(subprocess.getoutput(cmd))
 
-    now = time.time()
-    diff = now - start
+# 🧮 convert time string to seconds
+def time_to_seconds(time_str):
+    h, m, s = time_str.split(":")
+    return float(h)*3600 + float(m)*60 + float(s)
 
-    if diff % 2 < 1:
-        percent = current * 100 / total
-        bar = "█" * int(percent / 5) + "░" * (20 - int(percent / 5))
-
-        speed = current / diff / 1024 / 1024
-        done = current / 1024 / 1024
-        total_mb = total / 1024 / 1024
-
-        await message.edit(
-            f"{text}\n\n"
-            f"[{bar}] {percent:.2f}%\n\n"
-            f"⚡ {speed:.2f} MB/s\n"
-            f"📦 {done:.2f}/{total_mb:.2f} MB"
-        )
-
-
-@app.on_message(filters.command("start"))
-async def start(_, message):
-
-    await message.reply_text(
-        "🎬 MKV → MP4 BOT\n\n"
-        "Send MKV video under 500MB\n"
-        "Converted file will be uploaded to Catbox."
-    )
-
-
-def upload_catbox(file):
-
-    url = "https://catbox.moe/user/api.php"
-
-    data = {
-        "reqtype": "fileupload",
-        "userhash": CATBOX_HASH
-    }
-
-    files = {
-        "fileToUpload": open(file, "rb")
-    }
-
-    r = requests.post(url, data=data, files=files)
-
-    return r.text
-
-
-@app.on_message(filters.video)
-async def convert(client, message):
-
-    size = message.video.file_size
-
-    if size > 500 * 1024 * 1024:
-        return await message.reply("❌ File must be under 500MB")
-
-    status = await message.reply("📥 Downloading...")
-
-    start = time.time()
-
-    file_path = await message.download(
-        progress=progress,
-        progress_args=(status, start, "📥 Downloading")
-    )
-
-    await status.edit("⚙️ Remuxing MKV → MP4...")
-
-    output = file_path.rsplit(".", 1)[0] + ".mp4"
-
+# ⚡ convert with REAL progress
+async def convert_video(input_file, output_file, duration, msg):
     cmd = [
         "ffmpeg",
-        "-y",
-        "-i", file_path,
-        "-c:v", "copy",
+        "-i", input_file,
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "28",
         "-c:a", "copy",
-        "-sn",
-        output
+        output_file
     ]
 
-    process = subprocess.run(cmd)
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stderr=asyncio.subprocess.PIPE
+    )
 
-    if process.returncode != 0:
-        await status.edit("❌ Remux failed")
+    start = time.time()
+    last_update = 0
+
+    while True:
+        line = await process.stderr.readline()
+        if not line:
+            break
+
+        line = line.decode()
+
+        if "time=" in line:
+            match = re.search(r"time=(\d+:\d+:\d+\.\d+)", line)
+            if match:
+                current_time = time_to_seconds(match.group(1))
+                percent = (current_time / duration) * 100
+
+                elapsed = time.time() - start
+                speed = current_time / elapsed if elapsed > 0 else 0
+                eta = (duration - current_time) / speed if speed > 0 else 0
+
+                # update every 2 sec
+                if time.time() - last_update > 2:
+                    last_update = time.time()
+
+                    bar = "█" * int(percent // 5) + "░" * (20 - int(percent // 5))
+
+                    text = (
+                        f"⚙️ Converting...\n\n"
+                        f"[{bar}] {percent:.1f}%\n"
+                        f"⏱ ETA: {int(eta)} sec\n"
+                        f"🚀 Speed: {speed:.2f}x"
+                    )
+
+                    try:
+                        await msg.edit_text(text)
+                    except:
+                        pass
+
+    await process.wait()
+
+# 🎬 handler
+@bot.on_message(filters.video)
+async def handler(client, message: Message):
+    msg = await message.reply("📥 Downloading...")
+
+    file_path = await message.download()
+
+    codec = get_codec(file_path)
+
+    if codec == "h264":
+        await msg.edit("✅ Already H.264, Uploading...")
+        sent = await message.reply_video(file_path)
+
+        await asyncio.sleep(1)
+        await sent.delete()
+        os.remove(file_path)
         return
 
-    await status.edit("☁ Uploading to Catbox...")
+    duration = get_duration(file_path)
 
-    link = upload_catbox(output)
+    await msg.edit("🔄 Starting Conversion...")
 
-    await message.reply_text(
-        f"✅ Upload Complete\n\n🔗 {link}"
-    )
+    output = file_path.rsplit(".", 1)[0] + "_converted.mp4"
+
+    await convert_video(file_path, output, duration, msg)
+
+    await msg.edit("📤 Uploading...")
+
+    sent = await message.reply_video(output)
+
+    await asyncio.sleep(1)
+    await sent.delete()
 
     os.remove(file_path)
     os.remove(output)
 
-    await status.delete()
+    await msg.edit("✅ Done ⚡ (Auto Cleaned)")
 
-
-if __name__ == "__main__":
-    print("Bot Starting...")
-    app.run()
+bot.run()
