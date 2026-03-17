@@ -5,13 +5,13 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from cachetools import TTLCache
 import aiohttp
-from pyrofork import Client, filters
-from pyrofork.types import (
+from pyrogram import Client, filters
+from pyrogram.types import (
     Message, InlineKeyboardButton, InlineKeyboardMarkup,
     CallbackQuery
 )
-from pyrofork.enums import ParseMode
-from pyrofork.errors import FloodWait
+from pyrogram.enums import ParseMode
+from pyrogram.errors import FloodWait
 
 # Load environment variables
 load_dotenv()
@@ -33,7 +33,7 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
     logger.error("Please set API_ID, API_HASH, and BOT_TOKEN in .env file")
     exit(1)
 
-# Initialize Pyrofork Client
+# Initialize Pyrogram Client
 app = Client(
     "anime_bot",
     api_id=API_ID,
@@ -63,7 +63,6 @@ class AnimeScraper:
     async def search_anime(self, query: str) -> List[Dict]:
         """Search anime (simulated for demo)"""
         # In production, implement actual scraping
-        # For now, return demo data
         await asyncio.sleep(1)  # Simulate network delay
         return [
             {
@@ -302,11 +301,14 @@ async def callback_handler(client: Client, callback: CallbackQuery):
         
         for percent in range(10, 101, 10):
             await asyncio.sleep(0.2)
-            await message.edit_text(
-                f"📊 **Loading anime details...**\n\nProgress: {percent}%",
-                reply_markup=progress_keyboard(percent, "details", anime_id),
-                parse_mode=ParseMode.MARKDOWN
-            )
+            try:
+                await message.edit_text(
+                    f"📊 **Loading anime details...**\n\nProgress: {percent}%",
+                    reply_markup=progress_keyboard(percent, "details", anime_id),
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except:
+                pass
         
         # Show anime info (demo)
         text = """
@@ -349,11 +351,14 @@ async def callback_handler(client: Client, callback: CallbackQuery):
         
         for percent in range(10, 101, 10):
             await asyncio.sleep(0.15)
-            await message.edit_text(
-                f"📋 **Loading episodes...**\n\nProgress: {percent}%",
-                reply_markup=progress_keyboard(percent, "episodes", anime_id),
-                parse_mode=ParseMode.MARKDOWN
-            )
+            try:
+                await message.edit_text(
+                    f"📋 **Loading episodes...**\n\nProgress: {percent}%",
+                    reply_markup=progress_keyboard(percent, "episodes", anime_id),
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except:
+                pass
         
         # Create episode buttons (20 per page)
         start_ep = (page - 1) * 20 + 1
@@ -401,13 +406,16 @@ async def callback_handler(client: Client, callback: CallbackQuery):
         for i in range(1, 11):
             await asyncio.sleep(0.25)
             status = statuses[min(i//4, 2)]
-            await message.edit_text(
-                f"🔍 **Getting links for Episode {episode}...**\n\n"
-                f"Progress: {i*10}%\n"
-                f"Status: {status}",
-                reply_markup=progress_keyboard(i*10, "links", f"{anime_id}_{episode}"),
-                parse_mode=ParseMode.MARKDOWN
-            )
+            try:
+                await message.edit_text(
+                    f"🔍 **Getting links for Episode {episode}...**\n\n"
+                    f"Progress: {i*10}%\n"
+                    f"Status: {status}",
+                    reply_markup=progress_keyboard(i*10, "links", f"{anime_id}_{episode}"),
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except:
+                pass
         
         # Get links (simulated)
         links = await scraper.get_episode_links(anime_id, int(episode))
@@ -473,7 +481,7 @@ async def stats_command(client: Client, message: Message):
 # ==================== Main ====================
 
 async def main():
-    logger.info("Starting Anime Bot with Pyrofork...")
+    logger.info("Starting Anime Bot with Pyrogram...")
     try:
         await app.run()
     except KeyboardInterrupt:
