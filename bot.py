@@ -1,147 +1,80 @@
-import os
-import time
-import math
-import asyncio
 import subprocess
+import os
+import re
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Railway environment variables se credentials uthayenge
-API_ID = int(os.environ.get("API_ID", "0"))
-API_HASH = os.environ.get("API_HASH", "")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+# API Details (Railway/Termux Environment Variables se uthayega)
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-app = Client("h265_converter_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("ani_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Progress Bar Helper Function (To avoid Telegram flood limits, updates every 3 seconds)
-async def progress_for_pyrogram(current, total, ud_type, message, start):
-    now = time.time()
-    diff = now - start
-    if round(diff % 3.00) == 0 or current == total:
-        percentage = current * 100 / total
-        speed = current / diff if diff > 0 else 0
-        elapsed_time = round(diff) * 1000
-        time_to_completion = round((total - current) / speed) * 1000 if speed > 0 else 0
-        estimated_total_time = elapsed_time + time_to_completion
+# --- Commands ---
 
-        progress_str = "[{0}{1}]\nPercent: {2}%\n".format(
-            ''.join(["█" for i in range(math.floor(percentage / 5))]),
-            ''.join(["░" for i in range(20 - math.floor(percentage / 5))]),
-            round(percentage, 2))
-        
-        tmp = progress_str + "{0} of {1}\nSpeed: {2}/s\nETA: {3}s".format(
-            humanbytes(current), humanbytes(total), humanbytes(speed), round(time_to_completion / 1000))
-        
-        try:
-            await message.edit(text=f"{ud_type}\n{tmp}")
-        except Exception:
-            pass # Ignore floodwaits or message not modified errors
-
-def humanbytes(size):
-    if not size: return "0 B"
-    power = 2**10
-    n = 0
-    Dic_powerN = {0: ' ', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
-    while size > power:
-        size /= power
-        n += 1
-    return str(round(size, 2)) + " " + Dic_powerN[n] + 'B'
-
-# Check if video is H.265 (HEVC)
-def is_h265(file_path):
-    cmd = [
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=codec_name", "-of",
-        "default=noprint_wrappers=1:nokey=1", file_path
-    ]
-    try:
-        output = subprocess.check_output(cmd).decode().strip()
-        return output.lower() == "hevc"
-    except Exception as e:
-        print(f"Error checking codec: {e}")
-        return False
 @app.on_message(filters.command("start"))
-async def start_handler(client: Client, message: Message):
-    await message.reply_text(
-        "<blockquote>Bhai bot ekdum zinda hai!</blockquote> 🚀\n\n"
-        "Mujhe koi bhi H.265 (HEVC) video ya document bhej, aur main usko superfast speed se H.264 mein convert kar dunga. 😎\n"
-        "Bhej jaldi apni video!"
+async def start(client, message):
+    user_name = message.from_user.first_name
+    welcome_text = (
+        f"👋 **Ram Ram {user_name} Bhai!**\n\n"
+        "Main ek fast Anime Search Bot hoon. Bas niche di gayi command use karo:\n\n"
+        "🔹 `/search [Anime Name] Hindi` - Anime dhoondhne ke liye.\n"
+        "🔹 `/help` - Sabhi commands dekhne ke liye."
     )
+    # Reply to the user's message
+    await message.reply_text(welcome_text)
 
-@app.on_message(filters.video | filters.document)
-async def handle_video(client: Client, message: Message):
-    if not message.video and not message.document.mime_type.startswith('video/'):
-        return
+@app.on_message(filters.command("help"))
+async def help_cmd(client, message):
+    help_text = (
+        "📖 **Kaise use karein?**\n\n"
+        "1. Likho: `/search Naruto Hindi`\n"
+        "2. Thoda wait karo (Scraping...)\n"
+        "3. Main aapko direct Streaming Link dunga.\n\n"
+        "💡 *Tip: Hindi Dub ke liye 'Hindi' zaroor likhein.*"
+    )
+    await message.reply_text(help_text)
 
-    msg = await message.reply("⏳ Downloading video...", quote=True)
-    start_time = time.time()
+@app.on_message(filters.command("search"))
+async def search_anime(client, message):
+    # User ne kya search kiya wo nikalna
+    query = " ".join(message.command[1:])
     
-    # 1. Download Video
-    input_file = await message.download(
-        progress=progress_for_pyrogram,
-        progress_args=("⬇️ Downloading...", msg, start_time)
-    )
+    if not query:
+        return await message.reply_text("❌ **Bhai, anime ka naam toh likho!**\nExample: `/search Solo Leveling Hindi`")
 
-    if not input_file:
-        await msg.edit("❌ Download failed.")
-        return
+    status = await message.reply_text(f"🔍 **Dhoondh raha hoon:** `{query}`\n*Please wait...*")
 
-    await msg.edit("🔍 Checking video format...")
+    try:
+        # ani-cli -p (print mode) se direct link nikalna
+        # Hum pehla result (index 1) automate kar rahe hain
+        cmd = f"printf '1\n1\n' | ani-cli -p '{query}'"
+        result = subprocess.check_output(cmd, shell=True).decode("utf-8").strip()
 
-    # 2. Check Format
-    if not is_h265(input_file):
-        await msg.edit("✅ Ye video pehle se hi H.264 ya dusre format me hai. No need to convert!")
-        await asyncio.sleep(2) # Wait a bit before deleting message
-        await msg.delete()
-        os.remove(input_file)
-        return
+        # Link ko clean karna (sirf http wala part nikalna)
+        links = re.findall(r'(https?://\S+)', result)
+        
+        if links:
+            direct_link = links[-1] # Aksar aakhri link main video file hoti hai
+            
+            buttons = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📺 Play in VLC/MX", url=f"vlc://{direct_link}")],
+                [InlineKeyboardButton("🔗 Copy Direct Link", url=f"https://t.me/share/url?url={direct_link}")]
+            ])
+            
+            await status.edit(
+                f"✅ **Anime Mil Gaya!**\n\n"
+                f"📌 **Search:** `{query}`\n"
+                f"🌐 **Direct Link:** `{direct_link}`\n\n"
+                f"💡 *Copy karke kisi bhi player ya browser mein paste karein.*",
+                reply_markup=buttons
+            )
+        else:
+            await status.edit("❌ **Sorry bhai!** Is naam se koi link nahi mila. Thoda alag naam try karo.")
 
-    # 3. Convert Video (Fast preset)
-    output_file = f"{input_file}_converted.mp4"
-    await msg.edit("⚙️ H.265 detected! Converting to H.264 (Ultrafast mode). Please wait...")
-    
-    convert_cmd = [
-        "ffmpeg", "-y", "-i", input_file, 
-        "-c:v", "libx264", "-preset", "ultrafast", # Ultrafast for maximum speed
-        "-crf", "28", # Decent quality with lower file size
-        "-c:a", "copy", # Copy audio as is, saves time
-        output_file
-    ]
+    except Exception as e:
+        await status.edit(f"⚠️ **Error Aa Gaya:**\n`{str(e)}`")
 
-    # Run FFmpeg asynchronously so bot doesn't freeze
-    process = await asyncio.create_subprocess_exec(
-        *convert_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    await process.communicate()
-
-    if not os.path.exists(output_file):
-        await msg.edit("❌ Conversion failed.")
-        os.remove(input_file)
-        return
-
-    # 4. Upload Converted Video
-    start_time = time.time()
-    await msg.edit("⬆️ Uploading converted video...")
-    
-    await message.reply_video(
-        video=output_file,
-        caption="✅ Converted from H.265 to H.264",
-        progress=progress_for_pyrogram,
-        progress_args=("⬆️ Uploading...", msg, start_time)
-    )
-
-    await msg.delete()
-
-    # 5. Delete from server after 1 second
-    await asyncio.sleep(1)
-    if os.path.exists(input_file):
-        os.remove(input_file)
-    if os.path.exists(output_file):
-        os.remove(output_file)
-    print("🗑️ Cleaned up files from database/storage.")
-
-if __name__ == "__main__":
-    print("🤖 Bot is starting...")
-    app.run()
+print("Bot is starting...")
+app.run()
